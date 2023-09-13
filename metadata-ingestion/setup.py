@@ -112,7 +112,8 @@ kafka_protobuf = {
 
 sql_common = {
     # Required for all SQL sources.
-    "sqlalchemy>=1.3.24, <2",
+    # This is temporary lower bound that we're open to loosening/tightening as requirements show up
+    "sqlalchemy>=1.4.39, <2",
     # Required for SQL profiling.
     "great-expectations>=0.15.12, <=0.15.50",
     # scipy version restricted to reduce backtracking, used by great-expectations,
@@ -136,7 +137,7 @@ sqllineage_lib = {
 sqlglot_lib = {
     # Using an Acryl fork of sqlglot.
     # https://github.com/tobymao/sqlglot/compare/main...hsheth2:sqlglot:hsheth?expand=1
-    "acryl-sqlglot==16.7.6.dev6",
+    "acryl-sqlglot==18.0.2.dev15",
 }
 
 aws_common = {
@@ -172,13 +173,13 @@ bigquery_common = {
 }
 
 clickhouse_common = {
-    # Clickhouse 0.1.8 requires SQLAlchemy 1.3.x, while the newer versions
-    # allow SQLAlchemy 1.4.x.
-    "clickhouse-sqlalchemy>=0.1.8",
+    # Clickhouse 0.2.0 adds support for SQLAlchemy 1.4.x
+    "clickhouse-sqlalchemy>=0.2.0",
 }
 
 redshift_common = {
-    "sqlalchemy-redshift",
+    # Clickhouse 0.8.3 adds support for SQLAlchemy 1.4.x
+    "sqlalchemy-redshift>=0.8.3",
     "psycopg2-binary",
     "GeoAlchemy2",
     *sqllineage_lib,
@@ -188,13 +189,8 @@ redshift_common = {
 snowflake_common = {
     # Snowflake plugin utilizes sql common
     *sql_common,
-    # Required for all Snowflake sources.
-    # See https://github.com/snowflakedb/snowflake-sqlalchemy/issues/234 for why 1.2.5 is blocked.
-    "snowflake-sqlalchemy>=1.2.4, !=1.2.5",
-    # Because of https://github.com/snowflakedb/snowflake-sqlalchemy/issues/350 we need to restrict SQLAlchemy's max version.
-    # Eventually we should just require snowflake-sqlalchemy>=1.4.3, but I won't do that immediately
-    # because it may break Airflow users that need SQLAlchemy 1.3.x.
-    "SQLAlchemy<1.4.42",
+    # https://github.com/snowflakedb/snowflake-sqlalchemy/issues/350
+    "snowflake-sqlalchemy>=1.4.3",
     # See https://github.com/snowflakedb/snowflake-connector-python/pull/1348 for why 2.8.2 is blocked
     "snowflake-connector-python!=2.8.2",
     "pandas",
@@ -206,9 +202,7 @@ snowflake_common = {
 }
 
 trino = {
-    # Trino 0.317 broke compatibility with SQLAlchemy 1.3.24.
-    # See https://github.com/trinodb/trino-python-client/issues/250.
-    "trino[sqlalchemy]>=0.308, !=0.317",
+    "trino[sqlalchemy]>=0.308",
 }
 
 pyhive_common = {
@@ -229,8 +223,8 @@ microsoft_common = {"msal==1.22.0"}
 
 iceberg_common = {
     # Iceberg Python SDK
-    "acryl-iceberg-legacy==0.0.4",
-    "azure-identity==1.10.0",
+    "pyiceberg",
+    "pyarrow>=9.0.0, <13.0.0",
 }
 
 s3_base = {
@@ -247,8 +241,8 @@ s3_base = {
 }
 
 data_lake_profiling = {
-    "pydeequ>=1.0.1, <1.1",
-    "pyspark==3.0.3",
+    "pydeequ==1.1.0",
+    "pyspark~=3.3.0",
 }
 
 delta_lake = {
@@ -283,8 +277,7 @@ plugins: Dict[str, Set[str]] = {
     },
     # Integrations.
     "airflow": {
-        "apache-airflow >= 2.0.2",
-        *rest_common,
+        f"acryl-datahub-airflow-plugin == {package_metadata['__version__']}",
     },
     "circuit-breaker": {
         "gql>=3.3.0",
@@ -304,7 +297,6 @@ plugins: Dict[str, Set[str]] = {
         # TODO: I doubt we need all three sql parsing libraries.
         *sqllineage_lib,
         *sqlglot_lib,
-        "sql_metadata",
         "sqlalchemy-bigquery>=1.4.1",
         "google-cloud-datacatalog-lineage==0.2.2",
     },
@@ -421,6 +413,7 @@ mypy_stubs = {
     # The boto3-stubs package seems to have regularly breaking minor releases,
     # we pin to a specific version to avoid this.
     "boto3-stubs[s3,glue,sagemaker,sts]==1.28.15",
+    "mypy-boto3-sagemaker==1.28.15",  # For some reason, above pin only restricts `mypy-boto3-sagemaker<1.29.0,>=1.28.0`
     "types-tabulate",
     # avrogen package requires this
     "types-pytz",
@@ -431,6 +424,7 @@ mypy_stubs = {
     "types-Deprecated",
     "types-protobuf>=4.21.0.1",
     "types-tzlocal",
+    "sqlalchemy2-stubs",
 }
 
 
@@ -477,7 +471,7 @@ base_dev_requirements = {
             "druid",
             "elasticsearch",
             "feast" if sys.version_info >= (3, 8) else None,
-            "iceberg",
+            "iceberg" if sys.version_info >= (3, 8) else None,
             "json-schema",
             "ldap",
             "looker",
@@ -507,8 +501,8 @@ base_dev_requirements = {
             "salesforce",
             "unity-catalog",
             "nifi",
-            "vertica"
-            # airflow is added below
+            "vertica",
+            "mode",
         ]
         if plugin
         for dependency in plugins[plugin]
@@ -517,9 +511,6 @@ base_dev_requirements = {
 
 dev_requirements = {
     *base_dev_requirements,
-    # Extra requirements for Airflow.
-    "apache-airflow[snowflake]>=2.0.2",  # snowflake is used in example dags
-    "virtualenv",  # needed by PythonVirtualenvOperator
 }
 
 full_test_dev_requirements = {
@@ -533,7 +524,7 @@ full_test_dev_requirements = {
             "druid",
             "hana",
             "hive",
-            "iceberg",
+            "iceberg" if sys.version_info >= (3, 8) else None,
             "kafka-connect",
             "ldap",
             "mongodb",
@@ -543,6 +534,7 @@ full_test_dev_requirements = {
             "redash",
             "vertica",
         ]
+        if plugin
         for dependency in plugins[plugin]
     ),
 }
