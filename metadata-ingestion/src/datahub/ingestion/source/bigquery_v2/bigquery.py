@@ -285,9 +285,7 @@ class BigqueryV2Source(StatefulIngestionSourceBase, TestableSource):
         # Maps view ref -> actual sql
         self.view_definitions: FileBackedDict[str] = FileBackedDict()
 
-        self.sql_parser_schema_resolver = SchemaResolver(
-            platform=self.platform, env=self.config.env
-        )
+        self.sql_parser_schema_resolver = self._init_schema_resolver()
 
         self.add_config_to_report()
         atexit.register(cleanup, config)
@@ -446,6 +444,28 @@ class BigqueryV2Source(StatefulIngestionSourceBase, TestableSource):
             )
             return test_report
 
+    def _init_schema_resolver(self) -> SchemaResolver:
+        schema_resolution_required = (
+            self.config.lineage_parse_view_ddl or self.config.lineage_use_sql_parser
+        )
+        schema_ingestion_enabled = (
+            self.config.include_views and self.config.include_tables
+        )
+
+        if schema_resolution_required and not schema_ingestion_enabled:
+            if self.ctx.graph:
+                return self.ctx.graph.initialize_schema_resolver_from_datahub(
+                    platform=self.platform,
+                    platform_instance=self.config.platform_instance,
+                    env=self.config.env,
+                )
+            else:
+                logger.warning(
+                    "Failed to load schema info from DataHub as DataHubGraph is missing. "
+                    "Use `datahub-rest` sink OR provide `datahub-api` config in recipe. ",
+                )
+        return SchemaResolver(platform=self.platform, env=self.config.env)
+
     def get_dataplatform_instance_aspect(
         self, dataset_urn: str, project_id: str
     ) -> MetadataWorkUnit:
@@ -581,9 +601,6 @@ class BigqueryV2Source(StatefulIngestionSourceBase, TestableSource):
         db_views: Dict[str, List[BigqueryView]] = {}
 
         project_id = bigquery_project.id
-
-        yield from self.gen_project_id_containers(project_id)
-
         try:
             bigquery_project.datasets = (
                 self.bigquery_data_dictionary.get_datasets_for_project_id(project_id)
@@ -600,10 +617,22 @@ class BigqueryV2Source(StatefulIngestionSourceBase, TestableSource):
             return None
 
         if len(bigquery_project.datasets) == 0:
-            logger.warning(
-                f"No dataset found in {project_id}. Either there are no datasets in this project or missing bigquery.datasets.get permission. You can assign predefined roles/bigquery.metadataViewer role to your service account."
+            more_info = (
+                "Either there are no datasets in this project or missing bigquery.datasets.get permission. "
+                "You can assign predefined roles/bigquery.metadataViewer role to your service account."
             )
+            if self.config.exclude_empty_projects:
+                self.report.report_dropped(project_id)
+                warning_message = f"Excluded project '{project_id}' since no were datasets found. {more_info}"
+            else:
+                yield from self.gen_project_id_containers(project_id)
+                warning_message = (
+                    f"No datasets found in project '{project_id}'. {more_info}"
+                )
+            logger.warning(warning_message)
             return
+
+        yield from self.gen_project_id_containers(project_id)
 
         self.report.num_project_datasets_to_scan[project_id] = len(
             bigquery_project.datasets
